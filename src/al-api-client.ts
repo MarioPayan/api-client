@@ -32,6 +32,7 @@ export interface APIRequestParams extends AxiosRequestConfig {
   version?: string|number;          //  What version of the service do we want to talk to?
   account_id?: string;              //  Which account_id's data are we trying to access/modify through the service?
   path?: string;                    //  What is the path of the specific command within the resolved service that we are trying to interact with?
+  environment?: string              //  Which environment do we like to use? (production/integration)
 
   /**
    * Should data fetched from this endpoint be cached?  0 ignores caching, non-zero values are treated as milliseconds to persist retrieved data in local memory.
@@ -195,13 +196,15 @@ export class AlApiClient
    * Use HTTP Basic Auth
    * Optionally supply an mfa code if the user account is enrolled for Multi-Factor Authentication
    */
-  async authenticate( user: string, pass: string, mfa?:string ):Promise<AIMSSessionDescriptor> {
+  async authenticate( user: string, pass: string, mfa?:string, env?:string ):Promise<AIMSSessionDescriptor> {
     let payload = {};
     if (mfa) {
       payload = { mfa_code: mfa };
     }
+    let environment = env ? env : "production";
     return this.post( {
       service_name: 'aims',
+      environment: environment,
       path: 'authenticate',
       headers: {
         Authorization: `Basic ${this.base64Encode(`${user}:${pass}`)}`
@@ -216,9 +219,11 @@ export class AlApiClient
    * The session token can be used to complete authentication without re-entering the username and password, but must be used within 3 minutes (token expires)
    */
   /* tslint:disable:variable-name */
-  async authenticateWithMFASessionToken(token: string, mfa_code: string):Promise<AIMSSessionDescriptor> {
+  async authenticateWithMFASessionToken(token: string, mfa_code: string, env?:string):Promise<AIMSSessionDescriptor> {
+    let environment = env ? env : "production";
     return this.post( {
       service_name: 'aims',
+      environment: environment,
       path: 'authenticate',
       headers: {
         'X-AIMS-Session-Token': token
@@ -248,8 +253,10 @@ export class AlApiClient
   /**
    * Create a default Discovery Response for Global Stack
    */
-  public getDefaultEndpoint() {
+  public getDefaultEndpoint(isIntegration = false) {
+    const integrationUrl = 'api.global-integration.product.dev.alertlogic.com';
     let response = { global: 'api.global-services.global.alertlogic.com' };
+    response = isIntegration ? { global: integrationUrl } : response;
     if (this.isBrowserBased()) {
       /**
        * Do some machinations to find out if we are in Production or Integration
@@ -257,7 +264,7 @@ export class AlApiClient
       let tld = window.location.hostname;
       tld = tld.toString();
       if ( tld === 'localhost' || tld.match(/product.dev.alertlogic.com/gi) !== null ) {
-        response = { global: 'api.global-integration.product.dev.alertlogic.com' };
+        response = { global: integrationUrl };
       }
     }
     return response;
@@ -296,7 +303,11 @@ export class AlApiClient
   }
 
   public async calculateEndpointURI( params: APIRequestParams ):Promise<AlApiTarget> {
-    const defaultEndpoint = this.getDefaultEndpoint();
+    let isIntegration = false;
+    if ( params.environment && params.environment == "integration") {
+      isIntegration = true;
+    }
+    const defaultEndpoint = this.getDefaultEndpoint(isIntegration);
     let fullPath = '';
     if ( ! params.service_name ) {
       throw new Error("Usage error: calculateEndpointURI requires a service_name to work properly." );
